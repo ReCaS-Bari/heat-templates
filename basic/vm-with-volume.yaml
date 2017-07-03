@@ -1,0 +1,108 @@
+heat_template_version: 2014-10-16
+
+description: Simple template to deploy a single compute instance with a volume attached
+
+parameters:
+  key_name:
+    type: string
+    label: Key VM
+  vm_name:
+    type: string
+    label: VM name
+  image:
+    type: string
+    label: Image id/name
+    description: Image to be used for compute instance
+  flavor:
+    type: string
+    label: Instance Type
+    description: Type of instance (flavor) to be used
+    default: small
+  network:
+    type: string
+    label: Network id/nane
+    description: Network where the instance will be deployed
+    default: private_net
+  volume_size:
+    type: number
+    description: Size of the volume to be created.
+    default: 1
+  mountpoint:
+    type: string
+    description: The directory to provide to the user
+    default: /mnt/workingdir
+
+resources:
+
+  secgroup_base:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      rules:
+        - protocol: icmp
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: tcp
+          remote_mode: remote_group_id
+
+
+  server_port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: network }
+      security_groups: 
+         - {get_resource: secgroup_base }
+      replacement_policy: AUTO
+
+  my_instance:
+    type: OS::Nova::Server
+    properties:
+      name: { get_param: vm_name }
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - port: {get_resource: server_port}
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          template: |
+            #!/bin/bash -v
+            #Allow user to use volume
+            voldata_id=volume_id
+            voldata_dev="/dev/disk/by-id/virtio-$(echo ${voldata_id} | cut -c -20)"
+            mkdir -p mountpoint
+            mkfs.ext4 ${voldata_dev} && mount ${voldata_dev} mountpoint
+            echo "Successfully device mounted"
+
+            #For reboot instance
+            echo "${voldata_dev} mountpoint ext4 defaults 0 0" >> /etc/fstab
+
+          params:
+            mountpoint: { get_param: mountpoint }
+            volume_id:  { get_resource: cinder_volume }
+  cinder_volume:
+    type: OS::Cinder::Volume
+    properties:
+      size: { get_param: volume_size }
+  
+  volume_attachment:
+    type: OS::Cinder::VolumeAttachment
+    properties:
+      volume_id: { get_resource: cinder_volume }
+      instance_uuid: { get_resource: my_instance }
+      mountpoint: null
+      volume_id:
+        get_resource: cinder_volume
+
+
+outputs:
+  instance_id:
+    description: "Resource ID assigned to the newly created instance"
+    value:
+      get_resource: my_instance
+
+  instance_ip:
+    description: The IP address of the deployed instance
+    value: {get_attr: [server_port, fixed_ips, 0, ip_address]}
+

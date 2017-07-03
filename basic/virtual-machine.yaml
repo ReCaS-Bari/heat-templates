@@ -1,0 +1,69 @@
+heat_template_version: 2014-10-16
+
+description: Simple template to deploy a single compute instance
+
+parameters:
+  key_name:
+    type: string
+    label: Key VM
+  vm_name:
+    type: string
+    label: VM name
+  image:
+    type: string
+    label: Image id/name
+    description: Image to be used for compute instance
+  flavor:
+    type: string
+    label: Instance Type
+    description: Type of instance (flavor) to be used
+    default: small
+  network:
+    type: string
+    label: Network id/nane
+    description: Network where the instance will be deployed
+    default: private_net
+
+resources:
+
+  secgroup_base:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      rules:
+        - protocol: icmp
+        - protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: tcp
+          remote_mode: remote_group_id
+
+
+  server_port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: network }
+      security_groups: 
+         - {get_resource: secgroup_base }
+      replacement_policy: AUTO
+
+  my_instance:
+    type: OS::Nova::Server
+    properties:
+      name: { get_param: vm_name }
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - port: {get_resource: server_port}
+
+
+outputs:
+  instance_id:
+    description: "Resource ID assigned to the newly created instance"
+    value:
+      get_resource: my_instance
+
+  instance_ip:
+    description: The IP address of the deployed instance
+    value: {get_attr: [server_port, fixed_ips, 0, ip_address]}
+
